@@ -1,0 +1,7 @@
+Revision history for Perl extension Compress::SelfExtracting.
+
+0.01  Wed May 22 09:20:17 2002
+	- original version; created by h2xs 1.21 with options
+		-APX Compress::SelfExtracting
+
+	- algorithms: LZSS, LZ77, LZW, bzip, Huffman
