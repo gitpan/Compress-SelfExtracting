@@ -7,7 +7,7 @@ use vars qw/@ISA @EXPORT @EXPORT_OK $VERSION/;
 @EXPORT_OK = qw/compress decompress/;
 @EXPORT = qw/zscript zfile/;
 @ISA = qw/Exporter/;
-$VERSION = 0.02;
+$VERSION = 0.03;
 
 my %O;
 BEGIN {
@@ -692,6 +692,7 @@ import Compress::SelfExtracting::LZW;
 
 1;
 __END__
+
 =head1 NAME
 
 Compress::SelfExtracting -- create compressed scripts

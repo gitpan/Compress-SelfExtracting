@@ -11,3 +11,6 @@ Revision history for Perl extension Compress::SelfExtracting.
 
 	- fixed to work with files larger than 8k (blocksize of
           <> operator).
+
+0.03 Tue May 28 08:10:25 PDT 2002
+	- minor POD tweak.
