@@ -7,7 +7,7 @@ use vars qw/@ISA @EXPORT @EXPORT_OK $VERSION/;
 @EXPORT_OK = qw/compress decompress/;
 @EXPORT = qw/zscript zfile/;
 @ISA = qw/Exporter/;
-$VERSION = 0.03;
+$VERSION = 0.04;
 
 my %O;
 BEGIN {
@@ -42,18 +42,22 @@ sub decompress
     my $data = shift;
     my %o = @_;
     @O{keys %o} = values %o;
-    if ($data =~ /^([0-9a-f]+)\n(.*)\z/so) {
+    if ($data =~ /^([0-9a-f]+)\n(.*)/s) {
 	if ($O{uu}) {
 	    $data = unpack 'u', $2;
 	} else {
-	    $data = $2;
+	    chomp($data = $2);
 	}
 	$data = &{"Compress::SelfExtracting::$O{type}::decompress"}($data, \%O);
 	my $cksum = md5_hex($data);
-	die "Bad checksum ($1 != $cksum) for code:\n$data\n--\n"
-	    unless $cksum eq $1;
+	unless ($cksum eq $1) {
+	    open BAD, ">BAD";
+	    print BAD $data;
+	    close BAD;
+	    die "Bad checksum\n";
+	}
     } else {
-	die "$0 doesn't look compressed:\n$data\n";
+	die "$0 doesn't look compressed\n";
     }
     $data;
 }
@@ -119,9 +123,8 @@ sub standalone
 {
     my $O = shift;
     my $ret = <<'EOC';
-BEGIN{open$^W=0;$/=$!;$_=join'',<0>;s/^.*?}\n//s;#UUDEC#
-while(length){($o,$l,$c)=unpack'SCC',$_;$r.=substr($r,$o,$l)
-.chr$c;$_=substr$_,4}#OP#$r;exit}
+BEGIN{open 0;$_=join'',<0>;s/^.*?}\n//s;#UUDEC#s/(...)(.)/
+($o,$l)=unpack SC,$1;$r.=substr($r,$o,$l).$2/egs;#OP#$r;exit}
 EOC
     if ($O->{uu}) {
 	$ret =~ s/#UUDEC#/\$_=unpack'u',\$_;/;
@@ -189,10 +192,9 @@ sub decompress
 sub standalone
 {
     my $ret = <<'END';
-BEGIN{open$^W=$o=0;$/=$!;$_=join'',<0>;s/^.*?}\n//s;#UUDEC#
-while($o<length){$n=unpack'C',substr$_,$o++;$r.=($n?substr($r,
-(unpack'S',substr$_,$o++),$n):(substr$_,$o,1));$o++}#OP#
-$r;exit}
+BEGIN{open 0;$_=join'',<0>;s/^.*?}\n//s;#UUDEC#($r.=($n=ord substr$_,
+$o++)?substr$r,(unpack S,substr$_,$o++),$n:substr$_,$o,1),$o++
+while$o<length;#OP#$r;exit}
 END
     my $O = shift;
     if ($O->{uu}) {
@@ -224,7 +226,10 @@ sub import
     %UNLZ = (12 => sub {
 		   my $code = shift;
 		   my @code;
-		   foreach (0..length($code)*2/3 - 1) {
+		   my $len = length($code);
+		   my $reallen = 2*$len/3;
+		   print STDERR "len = $len, reallen = $reallen\n";
+		   foreach (0..$reallen - 1) {
 		       push @code, (vec($code, 3*$_, 4)<<8)
 			         | (vec($code, 3*$_+1, 4)<<4)
 				 | (vec($code, 3*$_+2, 4));
@@ -234,7 +239,7 @@ sub import
 	       16 => sub { unpack 'S*', shift; });
     # Now the self-extracting glop:
     my $ANY_16 = <<'EOC';
-BEGIN{open$^W=0;$/=$!;%d=map{($_,chr)}0..($n=255);($s=join'',<0>)
+BEGIN{open 0;$/=$!;%d=map{($_,chr)}0..($n=255);($s=join'',<0>)
 =~s/^.*?}\n//s;#OP# join'',map{($C,$P)=@d{$_,$p};$p=$_;if
 (!defined$P){$d{$p}}elsif(defined$C){$d{++$n}=$P.substr$C,0,
 1;$C}else{$d{++$n}=$P.substr$P,0,1}}unpack'S*',#UUDEC#;exit}
@@ -242,7 +247,7 @@ EOC
     (my $u16 = $ANY_16) =~ s/#UUDEC#/unpack'u',\$s/;
     (my $n16 = $ANY_16) =~ s/#UUDEC#/\$s/;
     my $ANY_12 = <<'EOC';
-BEGIN{open$^W=0;$/=$!;%d=map{($_,chr)}0..($n=255);($s=join'',<0>)
+BEGIN{open 0;$/=$!;%d=map{($_,chr)}0..($n=255);($s=join'',<0>)
 =~s/^.*?}\n//s;#UUDEC##OP# join'',map{($C,$P)=@d{$_,$p};$p=$_;if
 (!defined$P){$C}elsif(defined$C){$d{++$n}=$P.substr$C,0,1;$C}else{
 $d{++$n}=$P.substr$P,0,1}}map{vec($s,3*$_,4)<<8|vec($s,3*$_+1,4)<<4
@@ -718,9 +723,9 @@ or
 =head1 DESCRIPTION
 
 C<Compress::SelfExtracting> allows you to create pure-Perl
-self-extracting scripts using a variety of compression algorithms.
-These scripts will then run on any system with a recent version of
-Perl.  It can also create self-extracting archives.
+self-extracting scripts (or files) using a variety of compression
+algorithms.  These scripts (files) will then be runnable (extractable)
+on any system with a recent version of Perl.
 
 =head2 Functions
 
@@ -764,13 +769,26 @@ on files larger than about 12 kilobytes.  Furthermore, the standalone
 decompression code is significantly larger than that for other
 methods.
 
-=item LZW -- Lempel-Ziv 78-based algorithm
-
 =item LZ77 -- Lempel-Ziv 77
+
+While its compression is significantly worse than LZW and LZSS, this
+method has the shortest self-extraction routine, making it useful for
+.signatures and very small scripts.
 
 =item LZSS -- a variant of LZ77
 
+LZSS provides better compression than LZ77, and its decompression code
+is only slightly longer.
+
+=item LZW -- Lempel-Ziv 78-based algorithm
+
+Probably the most useful algorithm, as it decompresses quickly and
+yields a good compression ratio.  The decompression code, while longer
+than that for LZ77 and LZSS, is much shorter than that for BWT.
+
 =item Huffman -- Huffman character-frequency coding
+
+Useful mainly as a subroutine in BWT coding.
 
 =back
 
@@ -782,9 +800,8 @@ C<Compress::SelfExtracting::Filter>.
 =item uu (default: no)
 
 Create a uucompressed script.  The result will be one third larger,
-but will still be runnable, and will be 8-bit clean.  Interestingly,
-novice programmers may find it hard to distinguish between the
-decompression code and the UU-encoded data.
+but will still be runnable, will be 8-bit clean, and will have sane
+line-lengths.
 
 =back 
 

@@ -1,5 +1,5 @@
-Compress::SelfExtracting version 0.01
-=====================================
+Compress::SelfExtracting version 0.04
+==========================================
 
 Compress::SelfExtracting allows you to create pure-Perl
 self-extracting scripts using a variety of compression algorithms.
@@ -20,6 +20,7 @@ DEPENDENCIES
 This module requires these other modules and libraries:
 
   Digest::MD5
+  Filter::Simple
 
 COPYRIGHT AND LICENCE
 
