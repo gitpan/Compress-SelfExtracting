@@ -5,14 +5,15 @@ require Exporter;
 use vars qw/@ISA @EXPORT @EXPORT_OK $VERSION/;
 
 @EXPORT_OK = qw/compress decompress/;
-@EXPORT = qw/zscript/;
+@EXPORT = qw/zscript zfile/;
 @ISA = qw/Exporter/;
-$VERSION = 0.01;
+$VERSION = 0.02;
 
 my %O;
 BEGIN {
     %O = (standalone => 1,
 	  type => 'LZW',
+	  op => 'eval',
 	  uu => 1);
 };
 
@@ -64,6 +65,13 @@ sub zscript
     print compress $data, @_;
 }
 
+sub zfile
+{
+    local $/ = undef;
+    my $data = <STDIN>;
+    print compress $data, @_, op => 'print';
+}
+
 ############################################################
 package Compress::SelfExtracting::LZ77;
 
@@ -111,15 +119,16 @@ sub standalone
 {
     my $O = shift;
     my $ret = <<'EOC';
-BEGIN{open$^W=0;$/=$!;$_=<0>;s/^.*?}\n//s;#UUDEC#while(length)
-{($o,$l,$c)=unpack'SCC',$_;$r.=substr($r,$o,$l).chr$c;$_=substr
-$_,4}eval$r;exit}
+BEGIN{open$^W=0;$/=$!;$_=join'',<0>;s/^.*?}\n//s;#UUDEC#
+while(length){($o,$l,$c)=unpack'SCC',$_;$r.=substr($r,$o,$l)
+.chr$c;$_=substr$_,4}#OP#$r;exit}
 EOC
     if ($O->{uu}) {
 	$ret =~ s/#UUDEC#/\$_=unpack'u',\$_;/;
     } else {
 	$ret =~ s/#UUDEC#//;
     }
+    $ret =~ s/#OP#/$O->{op}/;
     $ret;
 }
 
@@ -180,16 +189,18 @@ sub decompress
 sub standalone
 {
     my $ret = <<'END';
-BEGIN{open$^W=$o=0;$/=$!;$_=<0>;s/^.*?}\n//s;#UUDEC#while
-($o<length){$n=unpack'C',substr$_,$o++;$r.=($n?substr($r,
-(unpack'S',substr$_,$o++),$n):(substr$_,$o,1));$o++}eval
+BEGIN{open$^W=$o=0;$/=$!;$_=join'',<0>;s/^.*?}\n//s;#UUDEC#
+while($o<length){$n=unpack'C',substr$_,$o++;$r.=($n?substr($r,
+(unpack'S',substr$_,$o++),$n):(substr$_,$o,1));$o++}#OP#
 $r;exit}
 END
-    if (shift->{uu}) {
+    my $O = shift;
+    if ($O->{uu}) {
 	$ret =~ s/#UUDEC#/\$_=unpack'u',\$_;/
     } else {
 	$ret =~ s/#UUDEC#//;
     }
+    $ret =~ s/#OP#/$O->{op}/;
     $ret;
 }
 
@@ -223,18 +234,19 @@ sub import
 	       16 => sub { unpack 'S*', shift; });
     # Now the self-extracting glop:
     my $ANY_16 = <<'EOC';
-BEGIN{open$^W=0;$/=$!;%d=map{($_,chr)}0..($n=255);($s=<0>)
-=~s/^.*?}\n//s;eval join'',map{($C,$P)=@d{$_,$p};$p=$_;if
+BEGIN{open$^W=0;$/=$!;%d=map{($_,chr)}0..($n=255);($s=join'',<0>)
+=~s/^.*?}\n//s;#OP# join'',map{($C,$P)=@d{$_,$p};$p=$_;if
 (!defined$P){$d{$p}}elsif(defined$C){$d{++$n}=$P.substr$C,0,
 1;$C}else{$d{++$n}=$P.substr$P,0,1}}unpack'S*',#UUDEC#;exit}
 EOC
     (my $u16 = $ANY_16) =~ s/#UUDEC#/unpack'u',\$s/;
     (my $n16 = $ANY_16) =~ s/#UUDEC#/\$s/;
     my $ANY_12 = <<'EOC';
-BEGIN{open$^W=0;$/=$!;%d=map{($_,chr)}0..($n=255);($s=<0>)=~s/^.*?}\n//s;
-#UUDEC#eval join'',map{($C,$P)=@d{$_,$p};$p=$_;if(!defined$P){$C}elsif
-(defined$C){$d{++$n}=$P.substr$C,0,1;$C}else{$d{++$n}=$P.substr$P,0,1}}map{
-vec($s,3*$_,4)<<8|vec($s,3*$_+1,4)<<4|vec$s,3*$_+2,4}0..length($s)*2/3-1;exit}
+BEGIN{open$^W=0;$/=$!;%d=map{($_,chr)}0..($n=255);($s=join'',<0>)
+=~s/^.*?}\n//s;#UUDEC##OP# join'',map{($C,$P)=@d{$_,$p};$p=$_;if
+(!defined$P){$C}elsif(defined$C){$d{++$n}=$P.substr$C,0,1;$C}else{
+$d{++$n}=$P.substr$P,0,1}}map{vec($s,3*$_,4)<<8|vec($s,3*$_+1,4)<<4
+|vec$s,3*$_+2,4}0..length($s)*2/3-1;exit}
 EOC
     (my $u12 = $ANY_12) =~ s/#UUDEC#/\$s=unpack'u',\$s;/;
     (my $n12 = $ANY_12) =~ s/#UUDEC#//;
@@ -292,8 +304,10 @@ sub decompress
 
 sub standalone
 {
-    my $o = shift;
-    return $SA{"$o->{bits}u$o->{uu}"};
+    my $O = shift;
+    my $ret = $SA{"$O->{bits}u$O->{uu}"};
+    $ret =~ s/#OP#/$O->{op}/;
+    $ret;
 }
 
 ############################################################
@@ -398,17 +412,21 @@ sub decompress
 
 sub standalone
 {
+
     my $ret = <<'EOC';
-BEGIN{open 0;$/=$!;($s=<0>)=~s/^.*?}\n//s;#UUDEC#($l,$L)=unpack'CL',$s;$s=
-substr$s,5;for(1..$l){($c,$x)=unpack'Cb32',$s;$x=~s/^0*1//;$r{$x}=chr$c;$s
-=substr$s,5}$_=unpack"b$L",$s;while(length){$n=1;1while!exists$r{substr$_,
-0,$n++};$r.=$r{substr$_,0,--$n};$_=substr$_,$n}eval$r;exit}
+BEGIN{open 0;$/=$!;($s=join'',<0>)=~s/^.*?}\n//s;#UUDEC#($l,$L)=
+unpack'CL',$s;$s=substr$s,5;for(1..$l){($c,$x)=unpack'Cb32',$s;
+$x=~s/^0*1//;$r{$x}=chr$c;$s=substr$s,5}$_=unpack"b$L",$s;while
+(length){$n=1;1while!exists$r{substr$_,0,$n++};$r.=$r{substr$_,
+0,--$n};$_=substr$_,$n}#OP#$r;exit}
 EOC
-    if (shift->{uu}) {
+    my $O = shift;
+    if ($O->{uu}) {
 	$ret =~ s/#UUDEC#/\$s=unpack'u',\$s;/;
     } else {
 	$ret =~ s/#UUDEC#//;
     }
+    $ret =~ s/#OP#/$O->{op}/;
     $ret;
 }
 
@@ -649,20 +667,23 @@ sub decompress
 sub standalone
 {
     my $ret = <<'EOC';
-BEGIN{open$^W=0;$/=$!;($s=<0>)=~s/^.*?}\n//s;#UUDEC#($l,$L)=unpack'CL',$s;
-$s=substr$s,5;for(1..$l){($c,$x)=unpack'Cb32',$s;$x=~s/^0*1//;$r{$x}=chr$c;
-$s=substr$s,5}$_=unpack"b$L",$s;while(length){$n=1;1while!exists$r{substr
-$_,0,$n++};$r.=$r{substr$_,0,--$n};$_=substr$_,$n}$P=unpack'L',$r;@l=map{ord
-}split'',substr$r,4;while(@l){push@R,(shift@l)x shift@l}@c=0..255;for(@R){
-push@M,$x=$c[$_];splice@c,$_,1;unshift@c,$x}for(0..$#M){$c=$M[$_];$P[$_]=
-$C[$c]++}for(@C){$s+=$_;$_=$s-$_}for(reverse 0..$#M){$c=$M[$P];$r[$_]=$c;
-$P=$P[$P]+$C[$c]}eval join'',map{chr}@r;exit}
+BEGIN{open$^W=0;$/=$!;($s=join'',<0>)=~s/^.*?}\n//s;#UUDEC#($l,$L)=
+unpack'CL',$s;$s=substr$s,5;for(1..$l){($c,$x)=unpack'Cb32',$s;$x=~
+s/^0*1//;$r{$x}=chr$c;$s=substr$s,5}$_=unpack"b$L",$s;while(length){
+$n=1;1while!exists$r{substr$_,0,$n++};$r.=$r{substr$_,0,--$n};$_=
+substr$_,$n}$P=unpack'L',$r;@l=map{ord}split'',substr$r,4;while(@l){
+push@R,(shift@l)x shift@l}@c=0..255;for(@R){push@M,$x=$c[$_];splice
+@c,$_,1;unshift@c,$x}for(0..$#M){$c=$M[$_];$P[$_]=$C[$c]++}for(@C){
+$s+=$_;$_=$s-$_}for(reverse 0..$#M){$c=$M[$P];$r[$_]=$c;$P=$P[$P]+
+$C[$c]}#OP# join'',map{chr}@r;exit}
 EOC
-    if (shift->{uu}) {
+    my $O = shift;
+    if ($O->{uu}) {
 	$ret =~ s/#UUDEC#/\$s=unpack'u',\$s;/;
     } else {
 	$ret =~ s/#UUDEC#//;
     }
+    $ret =~ s/#OP#/$O->{op}/;
     $ret;
 }
 
@@ -673,7 +694,7 @@ import Compress::SelfExtracting::LZW;
 __END__
 =head1 NAME
 
-Compress -- Compress your code.
+Compress::SelfExtracting -- create compressed scripts
 
 =head1 SYNOPSIS
 
@@ -687,12 +708,18 @@ or
       < script.pl > compressed.pl
   bash$ ssh user@host -e perl < compressed.pl
 
+or
+
+  bash$ perl -MCompress::SelfExtracting -e 'zfile ...' \
+      < myfile.txt > myfile.txt.plz
+  bash$ perl myfile.txt.plz > myfile.txt.copy
+
 =head1 DESCRIPTION
 
 C<Compress::SelfExtracting> allows you to create pure-Perl
 self-extracting scripts using a variety of compression algorithms.
 These scripts will then run on any system with a recent version of
-Perl.
+Perl.  It can also create self-extracting archives.
 
 =head2 Functions
 
@@ -702,6 +729,11 @@ Perl.
 
 Reads a script on standard input, and writes the compressed result to
 standard output.
+
+=item C<zfile>
+
+Like zscript, except the script it creates will print itself to
+standard output instead of executing.
 
 =item C<compress>
 
@@ -779,7 +811,7 @@ itself.  Let me know if you actually find it useful.
 # Burrows-Wheeler decompressor, saved with a few comments.  Otherwise,
 # this would be completely incomprehensible in no-time flat.
 
-BEGIN{open$^W=0;$/=$!;($s=<0>)=~s/^.*?}\n//s;#UUDEC#($l,$L)=unpack'CL',$s;$s=substr$s,5;for(1..$l){($c,$x)=unpack'Cb32',$s;$x=~s/^0*1//;$r{$x}=chr$c;$s=substr$s,5}$_=unpack"b$L",$s;while(length){$n=1;1while!exists$r{substr($_,0,$n++)};$r.=$r{substr$_,0,--$n};$_=substr$_,$n
+BEGIN{open$^W=0;$/=$!;($s=join'',<0>)=~s/^.*?}\n//s;#UUDEC#($l,$L)=unpack'CL',$s;$s=substr$s,5;for(1..$l){($c,$x)=unpack'Cb32',$s;$x=~s/^0*1//;$r{$x}=chr$c;$s=substr$s,5}$_=unpack"b$L",$s;while(length){$n=1;1while!exists$r{substr($_,0,$n++)};$r.=$r{substr$_,0,--$n};$_=substr$_,$n
 }$P=unpack'L',$r;		# get $pi.
 @l=map{ord}split'',substr($r,4);
 # un-RLE:
